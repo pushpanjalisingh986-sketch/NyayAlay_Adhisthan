@@ -1,0 +1,403 @@
+// ============================================================
+// NyayAlay / Adhisthan — Prisma Schema (Phase 2 Foundation)
+// PostgreSQL 16 + pgvector
+// ============================================================
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [pgvector(map: "vector")]
+}
+
+// ============================================================
+// ENUMS
+// ============================================================
+
+enum Role {
+  CITIZEN
+  LAWYER
+  NGO
+  ADMIN
+}
+
+enum LawVersion {
+  BNS
+  BNSS
+  BSA
+  IPC
+  CRPC
+  EVIDENCE_ACT
+  OTHER
+}
+
+enum KycStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+}
+
+enum CaseStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
+enum PaymentStatus {
+  INITIATED
+  SUCCESS
+  FAILED
+  REFUNDED
+}
+
+enum NgoType {
+  LEGAL_AID
+  WOMEN
+  CHILD
+  GENERAL
+  MENTAL_HEALTH
+}
+
+// ============================================================
+// AUTH MODULE
+// ============================================================
+
+model User {
+  id             String    @id @default(uuid()) @db.Uuid
+  email          String?   @unique
+  phone          String?   @unique
+  passwordHash   String?   @map("password_hash")
+  role           Role      @default(CITIZEN)
+  isAnonymous    Boolean   @default(false) @map("is_anonymous")
+  failedAttempts Int       @default(0) @map("failed_attempts")
+  lockedUntil    DateTime? @map("locked_until")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  refreshTokens      RefreshToken[]
+  lawyerProfile      LawyerProfile?
+  casesAsCitizen     Case[]               @relation("CitizenCases")
+  evidenceFiles      EvidenceFile[]
+  notifications      Notification[]
+  notificationPrefs  NotificationPreference?
+  chatSessions       ChatSession[]
+  lawyerReviews      LawyerReview[]
+
+  @@map("users")
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  tokenHash String   @map("token_hash")
+  familyId  String   @map("family_id") @db.Uuid
+  isRevoked Boolean  @default(false) @map("is_revoked")
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([familyId])
+  @@map("refresh_tokens")
+}
+
+// ============================================================
+// CHAT MODULE
+// ============================================================
+
+model ChatSession {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String?  @map("user_id") @db.Uuid
+  isAnonymous Boolean @default(false) @map("is_anonymous")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user     User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+  messages ChatMessage[]
+
+  @@index([userId])
+  @@map("chat_sessions")
+}
+
+model ChatMessage {
+  id        String   @id @default(uuid()) @db.Uuid
+  sessionId String   @map("session_id") @db.Uuid
+  role      String   // "user" | "assistant"
+  content   String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  session ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId])
+  @@map("chat_messages")
+}
+
+// ============================================================
+// KNOWLEDGE BASE MODULE
+// ============================================================
+
+model KbArticle {
+  id            String     @id @default(uuid()) @db.Uuid
+  title         String
+  body          String
+  category      String?
+  lawVersion    LawVersion @map("law_version")
+  effectiveDate DateTime   @map("effective_date") @db.Date
+  tags          String[]
+  createdAt     DateTime   @default(now()) @map("created_at")
+  updatedAt     DateTime   @updatedAt @map("updated_at")
+
+  chunks KbChunk[]
+
+  @@map("kb_articles")
+}
+
+model KbChunk {
+  id            String                      @id @default(uuid()) @db.Uuid
+  articleId     String                      @map("article_id") @db.Uuid
+  chunkIndex    Int                         @map("chunk_index")
+  content       String
+  embedding     Unsupported("vector(1536)")?
+  lawVersion    LawVersion                  @map("law_version")
+  effectiveDate DateTime                    @map("effective_date") @db.Date
+  createdAt     DateTime                    @default(now()) @map("created_at")
+  updatedAt     DateTime                    @updatedAt @map("updated_at")
+
+  article KbArticle @relation(fields: [articleId], references: [id], onDelete: Cascade)
+
+  @@index([articleId])
+  @@map("kb_chunks")
+}
+
+model KbEvaluation {
+  id        String   @id @default(uuid()) @db.Uuid
+  query     String
+  expected  String?
+  metrics   Json?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("kb_evaluations")
+}
+
+// ============================================================
+// LAWYER MODULE
+// ============================================================
+
+model LawyerProfile {
+  id               String    @id @default(uuid()) @db.Uuid
+  userId           String    @unique @map("user_id") @db.Uuid
+  barCouncilNumber String?   @map("bar_council_number")
+  specializations  String[]
+  languages        String[]
+  city             String?
+  state            String?
+  pincode          String?
+  feeRange         String?   @map("fee_range")
+  kycStatus        KycStatus @default(PENDING) @map("kyc_status")
+  isVerified       Boolean   @default(false) @map("is_verified")
+  ratingAvg        Float     @default(0) @map("rating_avg")
+  ratingCount      Int       @default(0) @map("rating_count")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  user      User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  documents LawyerDocument[]
+  reviews   LawyerReview[]
+  cases     Case[]            @relation("LawyerCases")
+
+  @@map("lawyer_profiles")
+}
+
+model LawyerDocument {
+  id        String   @id @default(uuid()) @db.Uuid
+  lawyerId  String   @map("lawyer_id") @db.Uuid
+  fileName  String   @map("file_name")
+  fileUrl   String   @map("file_url")
+  docType   String   @map("doc_type")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  lawyer LawyerProfile @relation(fields: [lawyerId], references: [id], onDelete: Cascade)
+
+  @@index([lawyerId])
+  @@map("lawyer_documents")
+}
+
+model LawyerReview {
+  id        String   @id @default(uuid()) @db.Uuid
+  lawyerId  String   @map("lawyer_id") @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  rating    Int
+  comment   String?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  lawyer LawyerProfile @relation(fields: [lawyerId], references: [id], onDelete: Cascade)
+  user   User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([lawyerId])
+  @@map("lawyer_reviews")
+}
+
+// ============================================================
+// CASE MODULE
+// ============================================================
+
+model Case {
+  id             String     @id @default(uuid()) @db.Uuid
+  citizenId      String     @map("citizen_id") @db.Uuid
+  lawyerId       String?    @map("lawyer_id") @db.Uuid
+  status         CaseStatus @default(OPEN)
+  idempotencyKey String     @unique @map("idempotency_key")
+  createdAt      DateTime   @default(now()) @map("created_at")
+  updatedAt      DateTime   @updatedAt @map("updated_at")
+
+  citizen  User          @relation("CitizenCases", fields: [citizenId], references: [id])
+  lawyer   LawyerProfile? @relation("LawyerCases", fields: [lawyerId], references: [id])
+  events   CaseEvent[]
+  messages CaseMessage[]
+  payments Payment[]
+  evidence EvidenceFile[]
+
+  @@index([citizenId])
+  @@index([lawyerId])
+  @@map("cases")
+}
+
+model CaseEvent {
+  id        String   @id @default(uuid()) @db.Uuid
+  caseId    String   @map("case_id") @db.Uuid
+  eventType String   @map("event_type")
+  payload   Json
+  createdBy String?  @map("created_by")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@index([caseId])
+  @@map("case_events")
+}
+
+model CaseMessage {
+  id        String   @id @default(uuid()) @db.Uuid
+  caseId    String   @map("case_id") @db.Uuid
+  senderId  String   @map("sender_id") @db.Uuid
+  content   String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@index([caseId])
+  @@map("case_messages")
+}
+
+// ============================================================
+// PAYMENT MODULE
+// ============================================================
+
+model Payment {
+  id             String        @id @default(uuid()) @db.Uuid
+  caseId         String?       @map("case_id") @db.Uuid
+  providerTxId   String?       @map("provider_tx_id")
+  amount         Decimal       @db.Decimal(12, 2)
+  currency       String        @default("INR")
+  status         PaymentStatus @default(INITIATED)
+  idempotencyKey String        @unique @map("idempotency_key")
+  receiptUrl     String?       @map("receipt_url")
+  createdAt      DateTime      @default(now()) @map("created_at")
+  updatedAt      DateTime      @updatedAt @map("updated_at")
+
+  case     Case?            @relation(fields: [caseId], references: [id])
+  receipts PaymentReceipt[]
+
+  @@index([caseId])
+  @@map("payments")
+}
+
+model PaymentReceipt {
+  id        String   @id @default(uuid()) @db.Uuid
+  paymentId String   @map("payment_id") @db.Uuid
+  url       String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  payment Payment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+
+  @@map("payment_receipts")
+}
+
+// ============================================================
+// EVIDENCE MODULE
+// ============================================================
+
+model EvidenceFile {
+  id                 String   @id @default(uuid()) @db.Uuid
+  caseId             String?  @map("case_id") @db.Uuid
+  uploadedBy         String   @map("uploaded_by") @db.Uuid
+  s3Key              String   @map("s3_key")
+  encryptionMetadata Json     @map("encryption_metadata")
+  fileType           String   @map("file_type")
+  fileSize           Int      @map("file_size")
+  expiresAt          DateTime @map("expires_at")
+  createdAt          DateTime @default(now()) @map("created_at")
+
+  case Case? @relation(fields: [caseId], references: [id])
+  user User  @relation(fields: [uploadedBy], references: [id])
+
+  @@index([caseId])
+  @@index([expiresAt])
+  @@map("evidence_files")
+}
+
+// ============================================================
+// NOTIFICATION MODULE
+// ============================================================
+
+model Notification {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  title     String
+  body      String
+  isRead    Boolean  @default(false) @map("is_read")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("notifications")
+}
+
+model NotificationPreference {
+  id               String  @id @default(uuid()) @db.Uuid
+  userId           String  @unique @map("user_id") @db.Uuid
+  pushEnabled      Boolean @default(true) @map("push_enabled")
+  smsEnabled       Boolean @default(true) @map("sms_enabled")
+  emailEnabled     Boolean @default(false) @map("email_enabled")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("notification_preferences")
+}
+
+// ============================================================
+// NGO & HELPLINE
+// ============================================================
+
+model NgoHelpline {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String
+  type      NgoType
+  phone     String?
+  email     String?
+  website   String?
+  city      String?
+  state     String?
+  languages String[]
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("ngo_helplines")
+}

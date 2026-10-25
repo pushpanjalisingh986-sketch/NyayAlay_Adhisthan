@@ -1,0 +1,64 @@
+# ======================
+# Environment & Secrets
+# ======================
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+secrets/
+
+# ======================
+# Dependencies
+# ======================
+node_modules/
+**/node_modules/
+.pnp
+.pnp.js
+
+# ======================
+# Build & Output
+# ======================
+dist/
+build/
+.next/
+out/
+coverage/
+*.tsbuildinfo
+
+# ======================
+# Python
+# ======================
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env/
+*.egg
+
+# ======================
+# IDE & OS
+# ======================
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# ======================
+# Docker & Logs
+# ======================
+*.log
+logs/
+docker-data/
+postgres-data/
+
+# ======================
+# Testing & Misc
+# ======================
+.nyc_output/
+*.lcov
+.cache/
+tmp/
+temp/ss
